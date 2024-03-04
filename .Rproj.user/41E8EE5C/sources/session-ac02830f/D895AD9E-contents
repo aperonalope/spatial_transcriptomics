@@ -1,0 +1,196 @@
+---
+title: "Assignment_NGS2"
+author: "Alvaro Perona"
+date: "2024-02-08"
+output: html_document
+---
+
+# <span style="color:blue"> **Ejercicio 1**</span>
+
+### <span style="color:blue"> Ejercicio 1.1 Procesamineto ya lineamiento de fastqc "Negative" </span>
+
+Creo de envirmoent
+```{bash, eval=FALSE}
+#Creo variable con el path a mi enviroment desde la root
+ST_PATH="/workspace/NGS_practicals/course_materials/segundo/"
+mkdir fastq
+mkdir sam
+mkdir fastQC
+mkdir sam_reports
+```
+
+Hago un fastqc de todos los fastq
+
+```{bash,eval=FALSE}
+#Hago reports de calidad con fastqc y los visualizo con multiqc
+fastqc -o ${ST_PATH}fastqc/ *fq
+multiqc -f ./
+```
+
+![](./Postive_Negative_fastqc.png){width=550 height=350 style="left"}  
+
+Vemos que el fastqc "Negative" tiene muy mala calidad en los extremos, pero los ~50 nucleotidos del medio tienen buena calidad. Para que tuviese un alineamiento similar al fastq "Positive" tenemos que deshacernos de esos nucleotidos de los extremos. Las primeras dos opciones que se me ocurren son : Hacer que cutadapt trimee los extremos que no superen un threshold de calidad y luego alinear end to end con bowtie2, o hacer un local alingnment de manera que los extremos queden como softclip pero el centro alinee.
+
+<br>
+Local alignment:
+
+
+```{bash,eval=FALSE}
+#Local alignment con un maximo de 20 Ns para que no tire directamente las secuencias
+bowtie2 --all --local  --n-ceil 20 -x ${st_path}/course_materials/genomes/AFPN02.1/AFPN02.1_merge -S ${st_path}/course_materials/segundo/sam/trimmed_Negative.sam ${st_path}/course_materials/segundo/fastq/trimmed_Negative.fq 2>${st_path}/course_materials/segundo/sam/trimmed_Negative_stats_local.txt
+```
+![](./negative_local.png)
+
+<br>
+Trimeado y luego end-to-end alingment:
+
+```{bash,eval=FALSE}
+#Triemado de manera que quite los nucleotidos del extremo 5` y 3` que no superen un phred de 15
+cutadapt -q 15,15 -o trimmed_Negative_fixed.fq trimmed_Negative.fq
+#Alinemaineto end to end estandar
+bowtie2 --all --end-to-end -x ${st_path}/course_materials/genomes/AFPN02.1/AFPN02.1_merge -S ${st_path}/course_materials/segundo/sam/trimmed_Negative_fixed.sam ${st_path}/course_materials/segundo/fastq/trimmed_Negative_fixed.fq 2> ${st_path}/course_materials/segundo/sam/trimmed_Negative_fixed_stats.txt
+```
+![](./negative_trimmed.png)
+
+Alineamiento del fastq "Positive":
+```{bash,eval=FALSE}
+#alineamiento end to end
+  bowtie2 --all --end-to-end -x ${st_path}/course_materials/genomes/AFPN02.1/AFPN02.1_merge -S ${st_path}/course_materials/segundo/sam/trimmed_Positive.sam ${st_path}/course_materials/segundo/fastq/trimmed_Positive.fq 2> ${st_path}/course_materials/segundo/sam/trimmed_Positive_stats.txt
+```
+
+
+![](./positive_align.png)
+<br>
+A primera vista parece que ambas opciones funcionan mas o menor bien. Para echar un vistazo mas detallado vamos a hacer unos reports con los comandos flagstat y stats de samtools y los vamos a visualizar con fastqc
+
+```{bash,eval=FALSE}
+#Creo variable con el path a los sams
+sams=${st_path}/sam/*sam
+#For loops que iteren sobre los sams y cree los reports en la carpeta sam_reports
+for sam in $sams;do samtools stats $sam >$st_path/sam_reports/$(basename ${sam%.sam}_stats.txt) ; done
+for sam in $sams;do samtools flagstat $sam >$st_path/sam_reports/$(basename ${sam%.sam}_flagstat.txt) ; done
+#Agrupamiento en un multiqc report
+multiqc -f ./
+```
+
+En general ambas opciones nos dan resultados muy similares al alineamineto <span style="color:green"> "Positive"</span> , aunque el alineamiento con previo trimeado  <span style="color:yellow"> "Negative_fixed" </span>, al compararlo con el alineamineto local <span style="color:red">  "Negative"</span>  produce un ligerisimo aumento del error rate del 0.10% al 0.11%
+![](./P_N_general_stats.png)
+Si nos fijamos en las estadisticas de las flags vemos que el alineamiento local tiene mayor numero de mapeado, pero tambine un mayor numero de multimappers, lo que es comprensible debido a que los extremos no tienen la necesidad de alinear y por tanto es mas facil que esas secuencias mapeen. 
+![](./flagstats.png)
+<br>
+<br>
+Aunque carezco de la experiencia necesaria para hacer un juicio adecuado sobre que metodo es mejor, en mi opinion es mejor ser mas astringente y tener un menor numero de multimappers, aunque eso signifique tener mas secuencias sin mapear. Prefiero tener menos y estar seguro de lo que es, que tener mas pero no tener la certeza de que alinee en una zona concreta. 
+
+
+<br>
+<br>
+
+### <span style="color:blue"> Ejercicio 1.2 Procesamineto ya lineamiento de fastqc "BQ" </span>
+
+Ahora queremos alinear las muestras con el nombre "BQ". En el multiqc podemos ver que es problema de estas muestras es que tiene muy mala calidad en los primeros nucleotidos del inico y del final. Omitiendo esos nucleotidos, el resto de la secuencia no es para tirar coetes tampoco. 
+![](./Fastq.png)
+![](./BQ_fastqc.png)
+
+Primero vamos a deshacernos de esos nucleotidos de mala calidad con cutadapt al igual que hicimos en la muestra "Negative" del ejercicio anterior y hacemos un alinead simple end to end a ver que tal.
+
+```{bash,eval=FALSE}
+cutadapt -q 15,15 -o trimmed_BQ_fixed.fq trimmed_BQ.fq
+bowtie2 --all --end-to-end -x ${st_path}/course_materials/genomes/AFPN02.1/AFPN02.1_merge -S ${st_path}/course_materials/segundo/sam/trimmed_BQ_fixed.sam ${st_path}/course_materials/segundo/fastq/trimmed_BQ_fixed.fq 
+```
+![](./Alineamiento_normal.png)
+Vemos que  solo un 80% alinea unicamente, un 17% no alinean y un 3% son multimappers. Vamos a toquitear parametros con el objetivo de bajar los no alineados sin incrementar mucho los mutlimappers.
+
+
+Lo primero que se me ocurre es incrementar la sensibilidad del alineamiento con el arguemtno --very sensitive. Esto hace que la semilla sea mas corta y que el espacio entre semillas tambien se reduzca. Tambien aumenta el numero de intentos de extension de semilla. Esto hace que el programa tard mas tiempo pero merece la pena si mejora el resutlado. 
+
+![](./ALINEAMIENTO_SENSIBLE.png)
+Vemos que esto mejora bastante el alineamiento. Incrementa en un 1% los multimappers pero reduce en un 7 % los no alineados, lo cual creo que es un buen trade off.
+
+Pense en cambiar el score minimo para que acepte el alineamiento pero no consegui un mejor resultado 
+```{bash,eval=FALSE}
+for i in $(seq 0 0.2 1);do 
+bowtie2 --all --end-to-end --very-sensitive --score-min L,-0.6,-$i -x ${st_path}/course_materials/genomes/AFPN02.1/AFPN02.1_merge -S ${st_path}/course_materials/segundo/sam/trimmed_BQ_fixed.sam ${st_path}/course_materials/segundo/fastq/trimmed_BQ_fixed.fq 2> ${st_path}/course_materials/segundo/sam/trimmed_BQ_stats.txt
+chmod -R 777 ${st_path}/course_materials/segundo/sam/trimmed_BQ_stats.txt
+echo "L,-0.6,-"$i>>${st_path}/course_materials/segundo/sam/trimmed_BQ_stats2.txt
+cat ${st_path}/course_materials/segundo/sam/trimmed_BQ_stats.txt >>${st_path}/course_materials/segundo/sam/trimmed_BQ_stats2.txt
+done
+
+cat ${st_path}/course_materials/segundo/sam/trimmed_BQ_stats2.txt
+``` 
+![](./prueba.png)
+
+
+Ahora hacemos los samtool reports
+```{bash, eval=FALSE}
+sams=$st_path/course_materials/segundo/sam/*.sam
+for sam in $sams;do samtools stats $sam >$st_path/course_materials/segundo/sam_reports/$(basename ${sam%.sam}_stats.txt) ; done
+for sam in $sams;do samtools flagstat $sam >$st_path/course_materials/segundo/sam_reports/$(basename ${sam%.sam}_flagstat.txt) ; done
+multiqc -f ./
+```
+
+Si vemos las estadisticas generales  vemos que nos hemos conseguido aproximar bastante al alineameinto de "Positive.fq", aunque con un error rate un 4% mayor y 100.000 seceuncias menos mapeadas(un 10% menos mas o menos).
+
+![](./report1.png)
+Tambien confirmamos lo que nos dijo bowtie respecto al % de multimappers y non mappers
+![](./report2.png)
+![](./report3.png)
+![](./report4.png)
+
+Vemos que llegamos al 90% de reads mapeadas y tenemos un erros del 5%. Tenemos mas multimappers en la muestra "Positive" que en las "BQ pero esto rpobablemente se deba a deba a que tiene mas secuencias mapeadas.
+
+
+### <span style="color:blue"> Ejercicio 1.2 Procesamiento de sams </span>
+
+El primer objetivo es conseguir dos sams, uno con los mutlimappers y otro con los que mapean unicamente. Pimero nos quitamos los no mapeados excluyendo los que tengan la flag 4.
+
+```{bash,eval=FALSE}
+samtools view -h -F 4 trimmed_BQ_fixed.sam > trimmed_BQ_fixed_mapped.sam
+samtools view -h trimmed_BQ_fixed_mapped.sam| awk '/XS/||/@/{print$0}' >trimmed_BQ_fixed_multimapped.sam
+samtools view -h trimmed_BQ_fixed_multimapped.sam| awk '!/XS/||/@/{print$0}' >trimmed_BQ_fixed_unique.sam
+```
+
+```{bash,eval=FALSE}
+samtools view -h -F 4 trimmed_BQ_fixed.sam > trimmed_BQ_fixed_mapped.sam
+```
+
+Ahora me gustaria aislar a las sequencias mutlimappers. La opcion facil seri usar samtools view seleccionando la flag 256 que corresponde a un alineamiento secundario. El problema es que eso no incluiria el alineamiento primario del multimapper. En esta imagen vemos que la misma read tiene un alineamineto con flag 16 (primario) y otro con flag 272 (256 secondari alignment+16 de reverse strand)
+![](./multi.png)
+
+Algo que si tienen tanto el alignment primario como los secundarios de un multimapper es la flag XS, asi que he decidido usar eso para filtrar.
+
+```{bash,eval=FALSE}
+#Selecciono con un awk las secuencias que tengan la flag xs y las meto en un sam de sequencias multimappers. Tambien quiero las lineas con @ ya que corresponden al header del archivo (me interesa conservarlo)
+samtools view -h trimmed_BQ_fixed_mapped.sam| awk '/XS/||/@/{print$0}' >trimmed_BQ_fixed_multimapped.sam
+# Hago otro awk excluyendo las que tengan la flag xs, dejando unicamente las sequencias de alineamiento unico.
+samtools view -h trimmed_BQ_fixed_multimapped.sam| awk '!/XS/||/@/{print$0}' >trimmed_BQ_fixed_unique.sam
+```
+
+
+Luego hay que conseguir un sam con las sequencias mapeadas y otro sin las mapeadas. El de las secuencias mapeadas ya lo tenemos del proceso anterior. 
+
+```{bash,eval=FALSE}
+samtools view -h -f 4 trimmed_BQ_fixed.sam > trimmed_BQ_fixed_unmapped.sam
+```
+
+Podriamos pedirle directamente a bowtie que nos de como output un sam file con las secuencias mapeadas almenos una vez  (argumento --al) y otro con los que fallen en alinear (argumento --un). Algo tal que asi:
+```{bash,eval=FALSE}
+bowtie2 --all --local --very-sensitive-local -x ${st_path}/course_materials/genomes/AFPN02.1/AFPN02.1_merge --un ${st_path}/course_materials/segundo/sam/trimmed_BQ_fixed_unmapped2.sam --al ${st_path}/course_materials/segundo/sam/trimmed_BQ_fixed_mapped2.sam -S ${st_path}/course_materials/segundo/sam/trimmed_BQ_fixed.sam ${st_path}/course_materials/segundo/fastq/trimmed_BQ_fixed.fq
+```
+
+Sin embargo esto son archivos fasta y lo que queremos son archvios sam, bowtie te puede dar como ouput un sam con unicamente las secuencias mapeadas, pero no uno con unicamente las secuencias sin mapear . Esto se hace con el argumento --no-unal. 
+```{bash,eval=FALSE}
+bowtie2 --all --local --very-sensitive-local -x ${st_path}/course_materials/genomes/AFPN02.1/AFPN02.1_merge --no-unal -S ${st_path}/course_materials/segundo/sam/trimmed_BQ_fixed.sam ${st_path}/course_materials/segundo/fastq/trimmed_BQ_fixed.fq
+```
+
+
+Usando blast vemos que las secuencias mapeadas son de E. coli, pero las que no mapean son de Homo Sapiens. Esto quiere decir que ha habido una contaminacion de la muestra durante el proceso.
+
+
+Ahora vamos a separar el sam en alineamientos de mas de tres mismatches y de menos. Para ello nos valdremos de la tag XM que especifica el numero de mismatches. Para obtener el sam de mas de tres, establecemos un awk que devuelva el header y las lecturas que en XM tengan numeros del 3 al 60. Tambien tenemos que decirle que exlucya al 0 porque awk lo incluye sino. Para el sam de menos de tres mismtaches hacemos lo mismo, aunque esta vez no hay que especificar que quite el 0.
+
+
+```{bash,eval=FALSE}
+awk '/XM:i:[3-60]/ && !/XM:i:0/ || /@/ {print $0}' trimmed_BQ_fixed.sam > trimmed_BQ_3more.sam
+awk '/XM:i:[0-2]/ || /@/ {print $0}' trimmed_BQ_fixed.sam > trimmed_BQ_3less.sam
+```
+
